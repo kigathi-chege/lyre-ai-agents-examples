@@ -5,6 +5,7 @@ import { env } from "$env/dynamic/private";
 const sdk = createClient({
   backendUrl: env.AXIS_BACKEND_URL || "http://localhost:8000",
   apiKey: env.OPENAI_API_KEY,
+  mode: "direct",
 });
 
 export async function POST({ request }) {

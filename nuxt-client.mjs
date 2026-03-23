@@ -1,6 +1,13 @@
-import { createClient } from '@kigathi/ai-agents';
-
 export default defineNuxtPlugin(() => {
-  const sdk = createClient({ backendUrl: '/backend', mode: 'proxy' });
-  return { provide: { aiAgents: sdk } };
+  return {
+    provide: {
+      aiAgents: {
+        run: (body) =>
+          $fetch('/api/chat', {
+            method: 'POST',
+            body,
+          }),
+      },
+    },
+  };
 });

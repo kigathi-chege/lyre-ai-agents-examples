@@ -12,8 +12,9 @@ export default defineEventHandler(async (event) => {
 
   if (!sdk) {
     sdk = createClient({
+      apiKey: config.openaiApiKey,
       backendUrl: config.axisBackendUrl,
-      mode: 'proxy',
+      mode: 'direct',
     });
   }
 

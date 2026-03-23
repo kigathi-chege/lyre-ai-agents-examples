@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "@kigathi/ai-agents": "file:../../../lyre-ai-agents-node",
-    "nuxt": "^3.16.0"
+    "nuxt": "^3.16.0",
+    "openai": "^6.21.0"
   },
   "devDependencies": {
     "@nuxtjs/tailwindcss": "^6.13.2"

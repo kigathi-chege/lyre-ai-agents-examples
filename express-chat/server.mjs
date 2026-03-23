@@ -8,8 +8,9 @@ const app = express();
 const port = Number(process.env.PORT || 3100);
 
 const sdk = createClient({
+  apiKey: process.env.OPENAI_API_KEY,
   backendUrl: process.env.AXIS_BACKEND_URL,
-  mode: 'proxy',
+  mode: 'direct',
 });
 
 app.use(express.json());

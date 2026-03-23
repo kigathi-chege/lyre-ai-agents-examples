@@ -136,7 +136,7 @@
 <main class="mx-auto flex min-h-screen max-w-5xl items-center justify-center p-6">
   <div class="w-full rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
     <h1 class="text-2xl font-bold">SvelteKit + @kigathi/ai-agents</h1>
-    <p class="mt-1 text-sm text-slate-500">Messages are persisted in Axis conversations/messages.</p>
+    <p class="mt-1 text-sm text-slate-500">Direct OpenAI execution with Axis conversation persistence.</p>
   </div>
 </main>
 

@@ -56,7 +56,7 @@ const sendMessage = async () => {
     <div class="w-full rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
       <h1 class="text-2xl font-bold">Nuxt + @kigathi/ai-agents</h1>
       <p class="mt-1 text-sm text-slate-500">
-        Proxied to Axis for threadless conversation persistence.
+        Direct OpenAI execution with Axis persistence.
       </p>
     </div>
   </main>

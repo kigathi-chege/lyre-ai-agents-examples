@@ -1,10 +1,13 @@
 # Express Chat Sample
 
-This sample uses `@kigathi/ai-agents` in `proxy` mode so Axis handles:
+This sample uses `@kigathi/ai-agents` in direct mode with backend persistence.
+OpenAI handles model execution, while Axis still receives conversation and message events.
 
-- Agent execution
-- Conversation/message persistence
-- Usage and cost tracking
+Required environment variables:
+
+- `OPENAI_API_KEY`
+- `AXIS_BACKEND_URL`
+- `LYRE_AGENT_ID`
 
 ## Run
 
