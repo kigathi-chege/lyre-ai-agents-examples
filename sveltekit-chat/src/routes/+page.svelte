@@ -143,6 +143,7 @@
 <button
   class="fixed bottom-4 right-4 inline-flex h-16 w-16 items-center justify-center rounded-full border border-gray-200 bg-black p-0 text-sm font-medium leading-5 text-white hover:bg-gray-700"
   type="button"
+  aria-label="Toggle chat widget"
   on:click={() => (isOpen = !isOpen)}
 >
   <svg xmlns="http://www.w3.org/2000/svg" width="30" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

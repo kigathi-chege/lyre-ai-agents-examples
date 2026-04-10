@@ -3,5 +3,57 @@
 @tailwind utilities;
 
 body {
-  @apply bg-slate-100 text-slate-900;
+  @apply bg-slate-100 text-slate-900 antialiased;
+}
+
+::highlight(readaloud-active) {
+  background: #fde68a;
+  color: inherit;
+}
+
+@layer components {
+  .blog-prose {
+    @apply mx-auto max-w-none text-[17px] leading-8 text-slate-700;
+  }
+
+  .blog-prose h2 {
+    @apply mt-2 text-3xl font-semibold tracking-tight text-slate-900;
+  }
+
+  .blog-prose h3 {
+    @apply mt-10 text-2xl font-semibold tracking-tight text-slate-900;
+  }
+
+  .blog-prose p {
+    @apply mt-5;
+  }
+
+  .blog-prose ul,
+  .blog-prose ol {
+    @apply mt-5 space-y-2 pl-6;
+  }
+
+  .blog-prose ul {
+    @apply list-disc;
+  }
+
+  .blog-prose ol {
+    @apply list-decimal;
+  }
+
+  .blog-prose blockquote {
+    @apply mt-6 rounded-r-xl border-l-4 border-slate-300 bg-slate-50 px-4 py-3 text-slate-600;
+  }
+
+  .blog-prose a {
+    @apply text-slate-900 underline decoration-slate-300 underline-offset-4 transition hover:decoration-slate-500;
+  }
+
+  .blog-prose strong {
+    @apply font-semibold text-slate-900;
+  }
+
+  .blog-prose em {
+    @apply italic text-slate-800;
+  }
 }
