@@ -27,6 +27,9 @@
 
   let readState: ReadState = "idle";
   let readError = "";
+  let showFloatingTrigger = false;
+  let triggerObserver: IntersectionObserver | null = null;
+  let primaryTriggerEl: HTMLButtonElement | null = null;
 
   let voices: VoiceOption[] = [];
   let voiceName = READ_ALOUD_DEFAULTS.speechOptions.voiceName;
@@ -35,14 +38,7 @@
   let volume = READ_ALOUD_DEFAULTS.speechOptions.volume;
   let instructions = DEFAULT_INSTRUCTIONS;
 
-  let controller: {
-    destroy: () => void;
-    state: {
-      loading: boolean;
-      playing: boolean;
-      activeWordIndex: number;
-    };
-  } | null = null;
+  let controller: ReturnType<typeof attachReadAloud> | null = null;
 
   let statePoller: number | null = null;
 
@@ -104,6 +100,17 @@
     }
   }
 
+  async function toggleReadAloud() {
+    if (!controller) return;
+    try {
+      await controller.toggle();
+      syncReadState();
+    } catch (error: any) {
+      readState = "error";
+      readError = error?.message || "Unable to toggle read-aloud.";
+    }
+  }
+
   onMount(() => {
     try {
       refreshVoices();
@@ -116,6 +123,16 @@
       createController();
 
       statePoller = window.setInterval(syncReadState, 120);
+
+      if (typeof IntersectionObserver !== "undefined" && primaryTriggerEl) {
+        triggerObserver = new IntersectionObserver(
+          ([entry]) => {
+            showFloatingTrigger = !entry.isIntersecting;
+          },
+          { threshold: 0.08 },
+        );
+        triggerObserver.observe(primaryTriggerEl);
+      }
     } catch (error: any) {
       readState = "error";
       readError =
@@ -126,6 +143,10 @@
       if (statePoller !== null) {
         window.clearInterval(statePoller);
       }
+
+      triggerObserver?.disconnect();
+      triggerObserver = null;
+      showFloatingTrigger = false;
 
       if (window.speechSynthesis) {
         window.speechSynthesis.onvoiceschanged = null;
@@ -176,6 +197,7 @@
 
       <div class="mt-7 flex flex-wrap items-center gap-3">
         <button
+          bind:this={primaryTriggerEl}
           id="read-aloud-trigger"
           type="button"
           disabled={readState === "error"}
@@ -283,5 +305,16 @@
         {@html data.post.content}
       </div>
     </article>
+
+    {#if showFloatingTrigger}
+      <button
+        type="button"
+        on:click={toggleReadAloud}
+        disabled={readState === "error"}
+        class="fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full border border-slate-300 bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200 disabled:text-slate-500"
+      >
+        {readLabel}
+      </button>
+    {/if}
   </div>
 </main>
