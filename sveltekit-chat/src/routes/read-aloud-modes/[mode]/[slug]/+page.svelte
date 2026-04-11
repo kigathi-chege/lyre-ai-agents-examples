@@ -45,6 +45,10 @@
   let statePoller: number | null = null;
   let readState: ReadState = "idle";
   let readError = "";
+  let readLabel = "Read Aloud";
+  let playbackPosition = 0;
+  let playbackDuration = 0;
+  let seekTarget = 0;
   let initializing = false;
   let useManualToggle = baseMode === "data-api" || baseMode === "data-direct";
   let showFloatingTrigger = false;
@@ -56,9 +60,19 @@
   let speechPitch = 1.0;
   let speechVolume = 1.0;
   let highlightColor = "#fde68a";
+  let highlightGuessedColor = "#fdba74";
   let highlightTextColor = "inherit";
   let highlightRadius = "0.6em";
   let highlightPadding = "0.04em 0.24em";
+  let highlightRenderer: "overlay" | "overlay-foreground" | "css" = "overlay";
+  let foregroundFillOpacity = 0.14;
+  let foregroundBorderWidth = "1.5px";
+  let foregroundBorderStyle = "solid";
+  let guessMode: "off" | "conservative" | "balanced" | "aggressive" = "aggressive";
+  let guessStrength = 0.45;
+  let guessLookahead = 12;
+  let guessMinConfidence = 0.2;
+  let debugLogsEnabled = true;
   let progressiveEnabled = true;
   let maxChunkChars = 1600;
   let prefetchAhead = 1;
@@ -79,9 +93,19 @@
       speechPitch,
       speechVolume,
       highlightColor,
+      highlightGuessedColor,
       highlightTextColor,
       highlightRadius,
       highlightPadding,
+      highlightRenderer,
+      foregroundFillOpacity,
+      foregroundBorderWidth,
+      foregroundBorderStyle,
+      guessMode,
+      guessStrength,
+      guessLookahead,
+      guessMinConfidence,
+      debugLogsEnabled,
       progressiveEnabled,
       maxChunkChars,
       prefetchAhead,
@@ -107,9 +131,29 @@
       speechPitch = Number(parsed.speechPitch ?? speechPitch);
       speechVolume = Number(parsed.speechVolume ?? speechVolume);
       highlightColor = String(parsed.highlightColor ?? highlightColor);
+      highlightGuessedColor = String(parsed.highlightGuessedColor ?? highlightGuessedColor);
       highlightTextColor = String(parsed.highlightTextColor ?? highlightTextColor);
       highlightRadius = String(parsed.highlightRadius ?? highlightRadius);
       highlightPadding = String(parsed.highlightPadding ?? highlightPadding);
+      highlightRenderer =
+        parsed.highlightRenderer === "css"
+          ? "css"
+          : parsed.highlightRenderer === "overlay-foreground"
+            ? "overlay-foreground"
+            : "overlay";
+      foregroundFillOpacity = Number(parsed.foregroundFillOpacity ?? foregroundFillOpacity);
+      foregroundBorderWidth = String(parsed.foregroundBorderWidth ?? foregroundBorderWidth);
+      foregroundBorderStyle = String(parsed.foregroundBorderStyle ?? foregroundBorderStyle);
+      guessMode =
+        parsed.guessMode === "off" ||
+        parsed.guessMode === "balanced" ||
+        parsed.guessMode === "aggressive"
+          ? parsed.guessMode
+          : "aggressive";
+      guessStrength = Number(parsed.guessStrength ?? guessStrength);
+      guessLookahead = Number(parsed.guessLookahead ?? guessLookahead);
+      guessMinConfidence = Number(parsed.guessMinConfidence ?? guessMinConfidence);
+      debugLogsEnabled = Boolean(parsed.debugLogsEnabled ?? debugLogsEnabled);
       progressiveEnabled = Boolean(parsed.progressiveEnabled ?? progressiveEnabled);
       maxChunkChars = Number(parsed.maxChunkChars ?? maxChunkChars);
       prefetchAhead = Number(parsed.prefetchAhead ?? prefetchAhead);
@@ -145,6 +189,18 @@
     } else if (readState !== "error") {
       readState = "idle";
     }
+
+    const currentTime = Number((controller.state as any).currentTime);
+    const duration = Number((controller.state as any).duration);
+    if (Number.isFinite(currentTime) && currentTime >= 0) {
+      playbackPosition = currentTime;
+      if (!Number.isFinite(seekTarget) || Math.abs(seekTarget - currentTime) < 0.8) {
+        seekTarget = currentTime;
+      }
+    }
+    if (Number.isFinite(duration) && duration >= 0) {
+      playbackDuration = duration;
+    }
   }
 
   function buildAttachSharedOptions() {
@@ -160,10 +216,56 @@
       instructions,
       highlight: {
         mode: "css",
+        renderer: highlightRenderer,
         color: highlightColor,
+        guessedColor: highlightGuessedColor,
         textColor: highlightTextColor,
         radius: highlightRadius,
         padding: highlightPadding,
+        foregroundFillOpacity,
+        foregroundBorderWidth,
+        foregroundBorderStyle,
+      },
+      guessing: {
+        mode: guessMode,
+        strength: guessStrength,
+        lookahead: guessLookahead,
+        minConfidence: guessMinConfidence,
+      },
+      debugHook: (event: any) => {
+        if (!debugLogsEnabled) return;
+        if (event?.type === "alignment_stats") {
+          const dropped = Number(event?.dropped_text || 0);
+          const guessed = Number(event?.guessed_matches || 0);
+          const strict = Number(event?.strict_matches || 0);
+          if (dropped > 0 || guessed > 0) {
+            console.warn("[read-aloud][alignment]", {
+              scope: event?.scope,
+              source: event?.source,
+              chunk_index: event?.chunk_index,
+              total_chunks: event?.total_chunks,
+              strict_matches: strict,
+              guessed_matches: guessed,
+              dropped_text: dropped,
+              dropped_timing: Number(event?.dropped_timing || 0),
+              confidence: event?.confidence,
+              guessed_enabled: event?.guessed_enabled,
+              guessed_reason: event?.guessed_reason,
+              guess_mode: event?.guess_mode,
+              guess_strength: event?.guess_strength,
+              lookahead: event?.lookahead,
+              min_confidence: event?.min_confidence,
+            });
+          }
+        } else if (
+          event?.type === "renderer_fallback" ||
+          event?.type === "renderer_selected" ||
+          event?.type === "renderer_switch"
+        ) {
+          console.info("[read-aloud][renderer]", event);
+        } else if (event?.type === "timing_words_missing") {
+          console.error("[read-aloud][timing]", event);
+        }
       },
       progressive: {
         enabled: progressiveEnabled,
@@ -213,6 +315,84 @@
     });
   }
 
+  function normalizeToken(value: string) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, "");
+  }
+
+  function applyGuessModeDefaults(mode: "off" | "conservative" | "balanced" | "aggressive") {
+    if (mode === "off") {
+      guessLookahead = 4;
+      guessMinConfidence = 1;
+      return;
+    }
+    if (mode === "conservative") {
+      guessLookahead = 8;
+      guessMinConfidence = 0.45;
+      return;
+    }
+    if (mode === "balanced") {
+      guessLookahead = 10;
+      guessMinConfidence = 0.32;
+      return;
+    }
+    guessLookahead = 12;
+    guessMinConfidence = 0.2;
+  }
+
+  function logIncomingTimingWords(
+    timingWords: Array<{ word: string; start: number; end: number }>,
+    label: string,
+  ) {
+    if (!debugLogsEnabled) return;
+    const words = Array.isArray(timingWords) ? timingWords : [];
+    const preview = words.slice(0, 60).map((entry) => ({
+      word: entry?.word,
+      start: entry?.start,
+      end: entry?.end,
+    }));
+    console.info(`[read-aloud][incoming-words] ${label}`, {
+      count: words.length,
+      preview,
+    });
+  }
+
+  function logDroppedWordSamples(text: string, timingWords: Array<{ word: string }>, label: string) {
+    if (!debugLogsEnabled) return;
+    const textWords = String(text || "").match(/\S+/g) || [];
+    const textNorm = textWords.map(normalizeToken);
+    const timingRaw = Array.isArray(timingWords) ? timingWords : [];
+    const timingNorm = timingRaw.map((entry) => normalizeToken(entry?.word || ""));
+    const textSet = new Set(textNorm.filter(Boolean));
+    const timingSet = new Set(timingNorm.filter(Boolean));
+
+    const droppedTextSamples: string[] = [];
+    const droppedTimingSamples: string[] = [];
+
+    for (let i = 0; i < textWords.length && droppedTextSamples.length < 20; i += 1) {
+      const token = textNorm[i];
+      if (!token) continue;
+      if (!timingSet.has(token)) {
+        droppedTextSamples.push(textWords[i]);
+      }
+    }
+    for (let i = 0; i < timingRaw.length && droppedTimingSamples.length < 20; i += 1) {
+      const token = timingNorm[i];
+      if (!token) continue;
+      if (!textSet.has(token)) {
+        droppedTimingSamples.push(String(timingRaw[i]?.word || ""));
+      }
+    }
+
+    if (droppedTextSamples.length || droppedTimingSamples.length) {
+      console.warn(`[read-aloud][dropped-samples] ${label}`, {
+        dropped_text_samples: droppedTextSamples,
+        dropped_timing_samples: droppedTimingSamples,
+      });
+    }
+  }
+
   async function ensureController() {
     if (controller || initializing) return;
     initializing = true;
@@ -254,7 +434,10 @@
               const payload = await response.json().catch(() => ({}));
               throw new Error(payload?.message || `Chunk failed (${response.status}).`);
             }
-            return await response.json();
+            const payload = await response.json();
+            logIncomingTimingWords(payload?.words || [], `datasource-api chunk ${chunk_index + 1}/${total_chunks}`);
+            logDroppedWordSamples(text, payload?.words || [], `datasource-api chunk ${chunk_index + 1}/${total_chunks}`);
+            return payload;
           },
         });
         useManualToggle = false;
@@ -267,11 +450,14 @@
         }
         controller = attachReadAloud({
           ...shared,
-          dataSource: async ({ text }) => {
-            return await browserDemoSdk.tts.speak({
+          dataSource: async ({ text, chunk_index, total_chunks }) => {
+            const payload = await browserDemoSdk.tts.speak({
               text,
               instructions: isFull ? instructions : undefined,
             });
+            logIncomingTimingWords(payload?.words || [], `datasource-direct chunk ${chunk_index + 1}/${total_chunks}`);
+            logDroppedWordSamples(text, payload?.words || [], `datasource-direct chunk ${chunk_index + 1}/${total_chunks}`);
+            return payload;
           },
         });
         useManualToggle = false;
@@ -280,6 +466,8 @@
 
       if (baseMode === "data-api") {
         const payload = await fetchSpeechPayload();
+        logIncomingTimingWords(payload?.words || [], "data-api full payload");
+        logDroppedWordSamples(data.post.textContent, payload?.words || [], "data-api full payload");
         controller = attachReadAloud({
           ...shared,
           data: payload,
@@ -290,6 +478,8 @@
 
       if (baseMode === "data-direct") {
         const payload = await fetchSpeechPayloadDirect();
+        logIncomingTimingWords(payload?.words || [], "data-direct full payload");
+        logDroppedWordSamples(data.post.textContent, payload?.words || [], "data-direct full payload");
         controller = attachReadAloud({
           ...shared,
           data: payload,
@@ -328,6 +518,33 @@
       readState = "error";
       readError = error?.message || "Unable to toggle read-aloud.";
     }
+  }
+
+  function formatTime(seconds: number) {
+    const safe = Math.max(0, Math.floor(Number(seconds) || 0));
+    const minutes = Math.floor(safe / 60);
+    const remain = safe % 60;
+    return `${minutes}:${String(remain).padStart(2, "0")}`;
+  }
+
+  async function commitSeek() {
+    if (!controller || baseMode === "browser") return;
+    try {
+      readError = "";
+      readState = "loading";
+      await (controller as any).seek(seekTarget);
+      syncReadState();
+    } catch (error: any) {
+      readState = "error";
+      readError = error?.message || "Unable to seek to requested position.";
+    }
+  }
+
+  async function jumpBy(seconds: number) {
+    if (!controller || baseMode === "browser") return;
+    const next = Math.max(0, Math.min(playbackDuration || seekTarget + seconds, seekTarget + seconds));
+    seekTarget = next;
+    await commitSeek();
   }
 
   onMount(() => {
@@ -424,6 +641,29 @@
         </span>
       </div>
 
+      {#if baseMode !== "browser"}
+        <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div class="flex items-center justify-between text-xs font-medium uppercase tracking-[0.1em] text-slate-500">
+            <span>Timeline</span>
+            <span>{formatTime(playbackPosition)} / {formatTime(playbackDuration)}</span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max={Math.max(0, playbackDuration || 0)}
+            step="0.1"
+            bind:value={seekTarget}
+            on:change={commitSeek}
+            class="mt-3 w-full accent-slate-700"
+          />
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button type="button" on:click={() => jumpBy(-10)} class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100">-10s</button>
+            <button type="button" on:click={commitSeek} class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100">Go to {formatTime(seekTarget)}</button>
+            <button type="button" on:click={() => jumpBy(10)} class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100">+10s</button>
+          </div>
+        </div>
+      {/if}
+
       {#if isFull}
         <div class="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
           <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
@@ -441,8 +681,20 @@
 
             <div class="grid gap-2 md:grid-cols-2">
               <label class="text-xs font-medium uppercase tracking-[0.1em] text-slate-500">
+                Renderer
+                <select bind:value={highlightRenderer} class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case">
+                  <option value="overlay">overlay</option>
+                  <option value="overlay-foreground">overlay-foreground</option>
+                  <option value="css">css</option>
+                </select>
+              </label>
+              <label class="text-xs font-medium uppercase tracking-[0.1em] text-slate-500">
                 Highlight Color
                 <input bind:value={highlightColor} class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case" />
+              </label>
+              <label class="text-xs font-medium uppercase tracking-[0.1em] text-slate-500">
+                Guessed Color
+                <input bind:value={highlightGuessedColor} class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case" />
               </label>
               <label class="text-xs font-medium uppercase tracking-[0.1em] text-slate-500">
                 Text Color
@@ -456,6 +708,46 @@
                 Padding
                 <input bind:value={highlightPadding} class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case" />
               </label>
+              <label class="text-xs font-medium uppercase tracking-[0.1em] text-slate-500">
+                Foreground Fill Opacity
+                <input bind:value={foregroundFillOpacity} type="number" min="0" max="1" step="0.01" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case" />
+              </label>
+              <label class="text-xs font-medium uppercase tracking-[0.1em] text-slate-500">
+                Foreground Border Width
+                <input bind:value={foregroundBorderWidth} class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case" />
+              </label>
+              <label class="text-xs font-medium uppercase tracking-[0.1em] text-slate-500">
+                Foreground Border Style
+                <input bind:value={foregroundBorderStyle} class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case" />
+              </label>
+            </div>
+
+            <div class="grid gap-2 md:grid-cols-2">
+              <label class="text-xs font-medium uppercase tracking-[0.1em] text-slate-500">
+                Guess Mode
+                <select
+                  bind:value={guessMode}
+                  on:change={() => applyGuessModeDefaults(guessMode)}
+                  class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case"
+                >
+                  <option value="off">off</option>
+                  <option value="conservative">conservative</option>
+                  <option value="balanced">balanced</option>
+                  <option value="aggressive">aggressive</option>
+                </select>
+              </label>
+              <label class="text-xs font-medium uppercase tracking-[0.1em] text-slate-500">
+                Guess Strength
+                <input bind:value={guessStrength} type="number" step="0.01" min="0" max="1" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case" />
+              </label>
+              <label class="text-xs font-medium uppercase tracking-[0.1em] text-slate-500">
+                Guess Lookahead
+                <input bind:value={guessLookahead} type="number" min="2" max="24" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case" />
+              </label>
+              <label class="text-xs font-medium uppercase tracking-[0.1em] text-slate-500">
+                Min Confidence
+                <input bind:value={guessMinConfidence} type="number" step="0.01" min="0" max="1" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case" />
+              </label>
             </div>
 
             <div class="flex flex-wrap gap-5">
@@ -466,6 +758,10 @@
               <label class="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-slate-600">
                 <input bind:checked={autoScrollEnabled} type="checkbox" class="h-4 w-4 rounded border-slate-300 accent-slate-700" />
                 Auto Scroll Enabled
+              </label>
+              <label class="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-slate-600">
+                <input bind:checked={debugLogsEnabled} type="checkbox" class="h-4 w-4 rounded border-slate-300 accent-slate-700" />
+                Debug Logs Enabled
               </label>
             </div>
 
